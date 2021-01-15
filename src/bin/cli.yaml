@@ -1,0 +1,29 @@
+name: yaml_app
+
+
+subcommands:
+    - set:
+        about: Set the value of a string key to a string
+        args:
+            - KEY:
+                help: A string key
+                required: true
+                takes_value: true
+            - VALUE:
+                help: The string value of the key
+                required: true
+                takes_value: true
+    - get:
+        about: Get the string value of a given string key
+        args:
+            - KEY:
+                help: A string key
+                required: true
+                takes_value: true
+    - rm:
+        about: Remove a given key
+        args:
+            - KEY:
+                help: A string key
+                required: true
+                takes_value: true
