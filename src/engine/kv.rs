@@ -1,3 +1,4 @@
+use super::KvsEngine;
 use crate::{KvsError, Result};
 use fs::OpenOptions;
 use io::BufWriter;
@@ -12,12 +13,13 @@ use std::{io::BufReader, path::PathBuf, u64, usize};
 // At most 2 MB inactive data
 const MAX_INACTIVE_DATA_SIZE: u64 = 1024 * 2048;
 const MAX_FILE_SIZE: u64 = 1024;
-/// The `KvStore` is used to store Key/Value pairs in a `HashMap`.
+/// The `KvStore` is a to store Key/Value pairs based on log-structured storage.
 /// Example:
 ///
 /// ```rust
 /// # use kvs::{KvStore, Result};
 /// use std::env::current_dir;
+/// use kvs::KvsEngine;
 /// fn main() -> Result<()> {
 /// let mut store = KvStore::open(current_dir()?)?;
 /// store.set("key".to_string(), "value".to_string())?;
@@ -35,6 +37,92 @@ pub struct KvStore {
     file_id: u64,
     index: BTreeMap<String, IndexEntry>,
     inactive_data: u64,
+}
+
+impl KvsEngine for KvStore {
+    /// Set the string value of a given string key.
+    ///
+    /// If the given key already exists, the previous value will be overwitten.
+    ///
+    /// # Errors
+    ///
+    /// Errors may be thrown when I/O and serializing
+    fn set(&mut self, key: String, value: String) -> Result<()> {
+        let command = Command::set(key, value);
+        let offset = self.writer.cursor;
+        serde_json::to_writer(&mut self.writer, &command)?;
+        self.writer.flush()?;
+        if let Some(index) = self.index.insert(
+            command.key(),
+            IndexEntry::new(self.file_id, offset, self.writer.cursor),
+        ) {
+            self.inactive_data += index.len;
+        }
+        if self.writer.cursor > MAX_FILE_SIZE {
+            self.file_id += 1;
+            self.writer = self.new_log_file(self.file_id)?;
+        }
+        if self.inactive_data >= MAX_INACTIVE_DATA_SIZE {
+            self.compact()?;
+        }
+
+        Ok(())
+    }
+
+    /// Get the string value of a given string key.
+    ///
+    /// Returns `None` if the given key does not exist.
+    ///
+    /// # Errors
+    ///
+    /// Errors may be thrown when I/O and serializing
+    fn get(&mut self, key: String) -> Result<Option<String>> {
+        if let Some(index) = self.index.get(&key) {
+            let reader = self
+                .readers
+                .get_mut(&index.file_id)
+                .expect("Internal error");
+            reader.seek(SeekFrom::Start(index.offset))?;
+            let cmd_reader = reader.take(index.len);
+            if let Command::Set { value, .. } = serde_json::from_reader(cmd_reader)? {
+                Ok(Some(value))
+            } else {
+                Err(KvsError::BrokenCommand)
+            }
+        } else {
+            // not an error, beaause we need to exit normally with code 0
+            Ok(None)
+        }
+    }
+
+    /// Remove a given string key.
+    ///
+    /// # Errors
+    ///
+    /// Returns `KvsError::KeyNotFound` if the given ket does not exixt.
+    /// Errors may be thrown when I/O and serializing
+    fn remove(&mut self, key: String) -> Result<()> {
+        if self.index.contains_key(&key) {
+            let command = Command::rm(key);
+            serde_json::to_writer(&mut self.writer, &command)?;
+            self.writer.flush()?;
+            if self.writer.cursor > MAX_FILE_SIZE {
+                self.file_id += 1;
+                self.writer = self.new_log_file(self.file_id)?;
+            }
+            if let Some(index) = self.index.remove(&command.key()) {
+                self.inactive_data += index.len;
+                if self.inactive_data >= MAX_INACTIVE_DATA_SIZE {
+                    self.compact()?;
+                }
+                Ok(())
+            } else {
+                Err(KvsError::BrokenIndex)
+            }
+        } else {
+            Err(KvsError::KeyNotFound)
+        }
+    }
 }
 
 impl KvStore {
@@ -58,77 +146,6 @@ impl KvStore {
             index,
             inactive_data,
         })
-    }
-
-    /// Get the string value of a given string key.
-    ///
-    /// Returns `None` if the given key does not exist.
-    pub fn get(&mut self, key: String) -> Result<Option<String>> {
-        if let Some(index) = self.index.get(&key) {
-            let reader = self
-                .readers
-                .get_mut(&index.file_id)
-                .expect("Internal error");
-            reader.seek(SeekFrom::Start(index.offset))?;
-            let cmd_reader = reader.take(index.len);
-            if let Command::Set { value, .. } = serde_json::from_reader(cmd_reader)? {
-                Ok(Some(value))
-            } else {
-                Err(KvsError::BrokenCommand)
-            }
-        } else {
-            // not an error, beaause we need to exit normally with code 0
-            Ok(None)
-        }
-    }
-
-    /// Sets the string value of a given string key.
-    ///
-    /// If the given key already exists, the previous value will be overwitten.
-    pub fn set(&mut self, key: String, value: String) -> Result<()> {
-        let command = Command::set(key, value);
-        let offset = self.writer.cursor;
-        serde_json::to_writer(&mut self.writer, &command)?;
-        self.writer.flush()?;
-        if let Some(index) = self.index.insert(
-            command.key(),
-            IndexEntry::new(self.file_id, offset, self.writer.cursor),
-        ) {
-            self.inactive_data += index.len;
-        }
-        if self.writer.cursor > MAX_FILE_SIZE {
-            self.file_id += 1;
-            self.writer = self.new_log_file(self.file_id)?;
-        }
-        if self.inactive_data >= MAX_INACTIVE_DATA_SIZE {
-            self.compact()?;
-        }
-
-        Ok(())
-    }
-
-    /// Remove a given string key.
-    pub fn remove(&mut self, key: String) -> Result<()> {
-        if self.index.contains_key(&key) {
-            let command = Command::rm(key);
-            serde_json::to_writer(&mut self.writer, &command)?;
-            self.writer.flush()?;
-            if self.writer.cursor > MAX_FILE_SIZE {
-                self.file_id += 1;
-                self.writer = self.new_log_file(self.file_id)?;
-            }
-            if let Some(index) = self.index.remove(&command.key()) {
-                self.inactive_data += index.len;
-                if self.inactive_data >= MAX_INACTIVE_DATA_SIZE {
-                    self.compact()?;
-                }
-                Ok(())
-            } else {
-                Err(KvsError::BrokenIndex)
-            }
-        } else {
-            Err(KvsError::KeyNotFound)
-        }
     }
 
     // create a new log file with Corresponding reader and writer
@@ -198,6 +215,7 @@ fn new_log_file(
     Ok(writter)
 }
 
+// load all previously log data
 fn load_logs(
     dir: &Path,
     file_ids: &[u64],
@@ -236,6 +254,7 @@ fn load_logs(
     Ok(inactive_data)
 }
 
+// get all previously log files' ids to reconstruct index
 fn get_file_ids(path: &Path) -> Result<Vec<u64>> {
     // use flatten to unwarap Option or result
     let mut ids: Vec<u64> = fs::read_dir(path)?
@@ -358,39 +377,5 @@ impl<T: Write + Seek> Seek for CursorBufferWriter<T> {
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
         self.cursor = self.writer.seek(pos)?;
         Ok(self.cursor)
-    }
-}
-
-mod test {
-
-    use crate::Result;
-    #[test]
-    fn test_split_log() -> Result<()> {
-        use std::env::current_dir;
-
-        use crate::KvStore;
-        use std::fs;
-        use std::path::PathBuf;
-        let mut store = KvStore::open(current_dir()?)?;
-
-        for i in 0..1000 {
-            store.set(format!("key{}", i), format!("value{}", i))?;
-        }
-
-        for i in 0..1000 {
-            assert_eq!(store.get(format!("key{}", i))?, Some(format!("value{}", i)));
-        }
-
-        let logs: Vec<PathBuf> = fs::read_dir(current_dir()?)?
-            .map(|res| res.map(|e| e.path()))
-            .flatten()
-            .filter(|path| path.is_file() && path.extension() == Some("log".as_ref()))
-            .collect();
-        println!("split into {} log files", logs.len());
-        for log in logs {
-            fs::remove_file(&log)?;
-        }
-
-        Ok(())
     }
 }

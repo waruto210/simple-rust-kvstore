@@ -5,3 +5,7 @@ Cargo.lock
 */.DS_Store
 /material
 *.log
+db
+conf
+snap.*
+/blobs
