@@ -20,6 +20,8 @@ use std::path::PathBuf;
 /// Ok(())
 /// }
 ///```
+
+#[derive(Clone)]
 pub struct SledKvsEngine {
     db: sled::Db,
 }
@@ -34,13 +36,13 @@ impl SledKvsEngine {
 }
 
 impl KvsEngine for SledKvsEngine {
-    fn set(&mut self, key: String, value: String) -> Result<()> {
+    fn set(&self, key: String, value: String) -> Result<()> {
         self.db.insert(key.as_str(), value.as_str())?;
         self.db.flush()?;
         Ok(())
     }
 
-    fn get(&mut self, key: String) -> Result<Option<String>> {
+    fn get(&self, key: String) -> Result<Option<String>> {
         let value = self.db.get(key.as_str())?.map(|ivec| ivec.to_vec());
         if let Some(value) = value {
             let s = String::from_utf8(value)?;
@@ -50,7 +52,7 @@ impl KvsEngine for SledKvsEngine {
         }
     }
 
-    fn remove(&mut self, key: String) -> Result<()> {
+    fn remove(&self, key: String) -> Result<()> {
         let old_value = self.db.remove(key.as_str())?;
         if let Some(_) = old_value {
             self.db.flush()?;

@@ -1,4 +1,5 @@
 use failure::Fail;
+use rayon;
 use sled;
 use std::io;
 use std::string::FromUtf8Error;
@@ -21,6 +22,10 @@ pub enum KvsError {
     /// Can't Parse String from invalid UTF-8 sequence
     #[fail(display = "{}", _0)]
     Utf8(#[cause] FromUtf8Error),
+
+    /// Can't build a rayon ThreadPool
+    #[fail(display = "{}", _0)]
+    Rayon(#[cause] rayon::ThreadPoolBuildError),
 
     /// Command in log has broken
     #[fail(display = "broken command")]
@@ -63,6 +68,12 @@ impl From<sled::Error> for KvsError {
 impl From<FromUtf8Error> for KvsError {
     fn from(err: FromUtf8Error) -> Self {
         KvsError::Utf8(err)
+    }
+}
+
+impl From<rayon::ThreadPoolBuildError> for KvsError {
+    fn from(err: rayon::ThreadPoolBuildError) -> Self {
+        KvsError::Rayon(err)
     }
 }
 

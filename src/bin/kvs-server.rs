@@ -1,8 +1,10 @@
 use clap::arg_enum;
 use env_logger::Builder;
-use kvs::{KvStore, KvsEngine, KvsServer};
-use kvs::{Result, SledKvsEngine};
+use kvs::thread_pool::*;
+use kvs::Result;
+use kvs::{KvStore, KvsEngine, KvsServer, SledKvsEngine};
 use log::{error, info, LevelFilter};
+use num_cpus;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::{env::current_dir, process::exit};
@@ -62,7 +64,8 @@ fn init(opt: ServerArgs) -> Result<()> {
 }
 
 fn start(engine: impl KvsEngine, addr: impl ToSocketAddrs) -> Result<()> {
-    let mut server = KvsServer::new(engine);
+    let pool = RayonThreadPool::new(num_cpus::get() as u32)?;
+    let mut server = KvsServer::new(engine, pool);
     server.start(addr)
 }
 

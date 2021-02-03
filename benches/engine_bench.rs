@@ -27,7 +27,7 @@ fn set_bench(c: &mut Criterion) {
 
                 (KvStore::open(temp_dir.path()).unwrap(), temp_dir)
             },
-            |(mut store, _temp_dir)| {
+            |(store, _temp_dir)| {
                 for i in 0..100 {
                     store.set(keys[i].clone(), values[i].clone()).unwrap();
                 }
@@ -51,7 +51,7 @@ fn set_bench(c: &mut Criterion) {
                 let temp_dir = TempDir::new().unwrap();
                 (SledKvsEngine::open(temp_dir.path()).unwrap(), temp_dir)
             },
-            |(mut db, _temp_dir)| {
+            |(db, _temp_dir)| {
                 for i in 0..100 {
                     db.set(keys[i].clone(), values[i].clone()).unwrap();
                 }
@@ -82,7 +82,7 @@ fn get_bench(c: &mut Criterion) {
             || {
                 let temp_dir = TempDir::new().unwrap();
 
-                let mut store = KvStore::open(temp_dir.path()).unwrap();
+                let store = KvStore::open(temp_dir.path()).unwrap();
                 let keys = keys.clone();
                 let values = values.clone();
                 for i in 0..1000 {
@@ -90,7 +90,7 @@ fn get_bench(c: &mut Criterion) {
                 }
                 (store, temp_dir)
             },
-            |(mut store, _temp_dir)| {
+            |(store, _temp_dir)| {
                 for i in 0..1000 {
                     let value = store.get(keys[i].clone()).unwrap();
                     assert_eq!(value, Some(values[i].clone()));
@@ -114,7 +114,7 @@ fn get_bench(c: &mut Criterion) {
         b.iter_batched(
             || {
                 let temp_dir = TempDir::new().unwrap();
-                let mut db = SledKvsEngine::open(temp_dir.path()).unwrap();
+                let db = SledKvsEngine::open(temp_dir.path()).unwrap();
                 let keys = keys.clone();
                 let values = values.clone();
                 for i in 0..1000 {
@@ -122,7 +122,7 @@ fn get_bench(c: &mut Criterion) {
                 }
                 (db, temp_dir)
             },
-            |(mut db, _temp_dir)| {
+            |(db, _temp_dir)| {
                 for i in 0..1000 {
                     let value = db.get(keys[i].clone()).unwrap();
                     assert_eq!(value, Some(values[i].clone()));

@@ -16,6 +16,9 @@ structopt = "0.3.21"
 env_logger = "0.8.2"
 log = "0.4.14"
 sled = "0.34.6"
+crossbeam = "0.8.0"
+num_cpus = "1.13.0"
+rayon = "1.5.0"
 
 
 [dev-dependencies]
@@ -25,7 +28,8 @@ predicates = "1.0.0"
 rand = { version = "0.8.3", features = ["small_rng"]}
 tempfile = "3.0.7"
 walkdir = "2.2.7"
-
+crossbeam-utils = "0.6.5"
+panic-control = "0.1.4"
 
 [[bench]]
 name = "engine_bench"
