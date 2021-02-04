@@ -28,5 +28,5 @@ walkdir = "2.2.7"
 
 
 [[bench]]
-name = "bench"
+name = "engine_bench"
 harness = false
