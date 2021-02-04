@@ -65,4 +65,7 @@ impl KvsClient {
             protocol::Response::Err(err) => Err(KvsError::StringError(err)),
         }
     }
+
+    /// close a client()
+    pub fn close(self) {}
 }

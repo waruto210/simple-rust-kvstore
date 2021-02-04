@@ -12,7 +12,9 @@ impl ThreadPool for RayonThreadPool {
     {
         assert!(threads > 0, "Thread pool threads must bigger than zero");
         Ok(RayonThreadPool(
-            rayon::ThreadPoolBuilder::new().num_threads(8).build()?,
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(threads as usize)
+                .build()?,
         ))
     }
 

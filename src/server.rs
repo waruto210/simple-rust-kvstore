@@ -7,6 +7,8 @@ use log::{debug, error};
 use serde_json;
 use std::io::{BufReader, BufWriter, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 /// A `KvsServer`
 pub struct KvsServer<E, P>
@@ -16,6 +18,7 @@ where
 {
     engine: E,
     pool: P,
+    state: Arc<AtomicBool>,
 }
 
 impl<E, P> KvsServer<E, P>
@@ -24,8 +27,12 @@ where
     P: ThreadPool,
 {
     /// A new `KvsServer`
-    pub fn new(engine: E, pool: P) -> KvsServer<E, P> {
-        KvsServer { engine, pool }
+    pub fn new(engine: E, pool: P, state: Arc<AtomicBool>) -> KvsServer<E, P> {
+        KvsServer {
+            engine,
+            pool,
+            state,
+        }
     }
 
     /// start running a `KvsServer`
@@ -37,6 +44,9 @@ where
     {
         let listener = TcpListener::bind(addr)?;
         for stream in listener.incoming() {
+            if !self.state.load(Ordering::SeqCst) {
+                break;
+            }
             let engine = self.engine.clone();
             self.pool.spawn(move || match stream {
                 Err(err) => {
@@ -49,7 +59,6 @@ where
                 }
             });
         }
-
         Ok(())
     }
 }

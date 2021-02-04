@@ -7,6 +7,8 @@ use log::{error, info, LevelFilter};
 use num_cpus;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::{env::current_dir, process::exit};
 use std::{fs, net::ToSocketAddrs};
 use structopt::StructOpt;
@@ -65,7 +67,8 @@ fn init(opt: ServerArgs) -> Result<()> {
 
 fn start(engine: impl KvsEngine, addr: impl ToSocketAddrs) -> Result<()> {
     let pool = RayonThreadPool::new(num_cpus::get() as u32)?;
-    let mut server = KvsServer::new(engine, pool);
+    let state = Arc::new(AtomicBool::new(true));
+    let mut server = KvsServer::new(engine, pool, state);
     server.start(addr)
 }
 

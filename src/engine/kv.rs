@@ -3,13 +3,15 @@ use crate::{KvsError, Result};
 use fs::OpenOptions;
 use io::BufWriter;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
-use std::sync::{atomic, Arc, Mutex, RwLock};
+use std::sync::{atomic, Arc, Mutex};
 use std::{cell::RefCell, ffi::OsStr};
 use std::{io::BufReader, path::PathBuf, u64, usize};
+// use crossbeam_skiplist::{SkipList, SkipMap};
+use crossbeam_skiplist::SkipMap;
 
 /// At most 2 MB inactive data
 const MAX_INACTIVE_DATA_SIZE: u64 = 1024 * 2048;
@@ -17,6 +19,7 @@ const MAX_INACTIVE_DATA_SIZE: u64 = 1024 * 2048;
 const MAX_FILE_SIZE: u64 = 1024;
 
 struct LogReader {
+    index: Arc<SkipMap<String, IndexEntry>>,
     file_id_bar: Arc<atomic::AtomicU64>,
     log_dir: PathBuf,
     // need interior mutability of refcell
@@ -26,6 +29,7 @@ struct LogReader {
 impl Clone for LogReader {
     fn clone(&self) -> Self {
         LogReader {
+            index: Arc::clone(&self.index),
             file_id_bar: Arc::clone(&self.file_id_bar),
             log_dir: self.log_dir.clone(),
             readers: RefCell::new(HashMap::new()),
@@ -34,6 +38,20 @@ impl Clone for LogReader {
 }
 
 impl LogReader {
+    fn get(&self, key: String) -> Result<Option<String>> {
+        if let Some(index) = self.index.get(&key) {
+            let cmd = self.read_command(index.value())?;
+            if let Command::Set { value, .. } = cmd {
+                Ok(Some(value))
+            } else {
+                Err(KvsError::BrokenCommand)
+            }
+        } else {
+            // not an error, beaause we need to exit normally with code 0
+            Ok(None)
+        }
+    }
+
     fn read_command(&self, index: &IndexEntry) -> Result<Command> {
         let mut readers = self.readers.borrow_mut();
         if !readers.contains_key(&index.file_id) {
@@ -69,7 +87,7 @@ struct LogWriter {
     reader: LogReader,
     writer: CursorBufferWriter<File>,
     file_id: u64,
-    index: Arc<RwLock<BTreeMap<String, IndexEntry>>>,
+    index: Arc<SkipMap<String, IndexEntry>>,
     inactive_data: u64,
     log_dir: PathBuf,
 }
@@ -80,12 +98,14 @@ impl LogWriter {
         let offset = self.writer.cursor;
         serde_json::to_writer(&mut self.writer, &command)?;
         self.writer.flush()?;
-        if let Some(index) = self.index.write().unwrap().insert(
-            command.key(),
-            IndexEntry::new(self.file_id, offset, self.writer.cursor),
-        ) {
-            self.inactive_data += index.len;
+        let key = command.key();
+        if let Some(index) = self.index.get(&key) {
+            self.inactive_data += index.value().len;
         }
+        self.index.insert(
+            key,
+            IndexEntry::new(self.file_id, offset, self.writer.cursor),
+        );
         if self.writer.cursor > MAX_FILE_SIZE {
             self.file_id += 1;
             self.writer = new_log_file(self.file_id, &self.log_dir)?;
@@ -99,8 +119,7 @@ impl LogWriter {
 
     fn remove(&mut self, key: String) -> Result<()> {
         {
-            let mut index = self.index.write().unwrap();
-            if index.contains_key(&key) {
+            if self.index.contains_key(&key) {
                 let command = Command::rm(key);
                 serde_json::to_writer(&mut self.writer, &command)?;
                 self.writer.flush()?;
@@ -108,8 +127,8 @@ impl LogWriter {
                     self.file_id += 1;
                     self.writer = new_log_file(self.file_id, &self.log_dir)?;
                 }
-                if let Some(index) = index.remove(&command.key()) {
-                    self.inactive_data += index.len;
+                if let Some(index) = self.index.remove(&command.key()) {
+                    self.inactive_data += index.value().len;
                 } else {
                     return Err(KvsError::BrokenIndex);
                 }
@@ -130,12 +149,15 @@ impl LogWriter {
         let mut compaction_file_id = self.file_id + 1;
         let mut compaction_writer = new_log_file(compaction_file_id, &self.log_dir)?;
         // traversing index entries
-        for index in self.index.write().unwrap().values_mut() {
-            let cmd = self.reader.read_command(index as &IndexEntry)?;
+        for entry in self.index.iter() {
+            let index = entry.value();
+            let cmd = self.reader.read_command(index)?;
             let offset = compaction_writer.cursor;
             serde_json::to_writer(&mut compaction_writer, &cmd)?;
             compaction_writer.flush()?;
-            *index = IndexEntry::new(compaction_file_id, offset, compaction_writer.cursor);
+            let new_index = IndexEntry::new(compaction_file_id, offset, compaction_writer.cursor);
+            self.index.insert(entry.key().clone(), new_index);
+
             if compaction_writer.cursor > MAX_FILE_SIZE {
                 compaction_writer.flush()?;
                 compaction_file_id += 1;
@@ -187,8 +209,6 @@ pub struct KvStore {
     log_dir: PathBuf,
     reader: LogReader,
     writer: Arc<Mutex<LogWriter>>,
-    /// write by set/remove, read by get
-    index: Arc<RwLock<BTreeMap<String, IndexEntry>>>,
 }
 
 impl KvsEngine for KvStore {
@@ -211,18 +231,7 @@ impl KvsEngine for KvStore {
     ///
     /// Errors may be thrown when I/O and serializing
     fn get(&self, key: String) -> Result<Option<String>> {
-        let index = self.index.read().unwrap();
-        if let Some(index) = index.get(&key) {
-            let cmd = self.reader.read_command(index)?;
-            if let Command::Set { value, .. } = cmd {
-                Ok(Some(value))
-            } else {
-                Err(KvsError::BrokenCommand)
-            }
-        } else {
-            // not an error, beaause we need to exit normally with code 0
-            Ok(None)
-        }
+        self.reader.get(key)
     }
 
     /// Remove a given string key.
@@ -244,7 +253,7 @@ impl KvStore {
         let file_ids = get_file_ids(&log_dir)?;
         let file_id = file_ids.last().unwrap_or(&0_u64) + 1;
 
-        let mut index = BTreeMap::new();
+        let mut index = SkipMap::new();
         let mut readers = HashMap::new();
         let inactive_data = load_logs(&log_dir, &file_ids, &mut index, &mut readers)?;
         let writer = new_log_file(file_id, &log_dir)?;
@@ -252,18 +261,18 @@ impl KvStore {
             file_id,
             CursorBufferReader::new(File::open(log_dir.join(format!("{}.log", file_id)))?)?,
         );
-
+        let index = Arc::new(index);
         let reader = LogReader {
+            index: index.clone(),
             log_dir: PathBuf::clone(&log_dir),
             readers: RefCell::new(readers),
             file_id_bar: Arc::new(atomic::AtomicU64::new(0)),
         };
-        let index = Arc::new(RwLock::new(index));
         let writer = Arc::new(Mutex::new(LogWriter {
             reader: reader.clone(),
             writer,
             file_id,
-            index: Arc::clone(&index),
+            index,
             inactive_data,
             log_dir: PathBuf::clone(&log_dir),
         }));
@@ -272,7 +281,6 @@ impl KvStore {
             log_dir,
             reader,
             writer,
-            index,
         })
     }
 }
@@ -293,7 +301,7 @@ fn new_log_file(file_id: u64, dir: &Path) -> Result<CursorBufferWriter<File>> {
 fn load_logs(
     dir: &Path,
     file_ids: &[u64],
-    index: &mut BTreeMap<String, IndexEntry>,
+    index: &mut SkipMap<String, IndexEntry>,
     readers: &mut HashMap<u64, CursorBufferReader<File>>,
 ) -> Result<u64> {
     let mut inactive_data = 0_u64;
@@ -309,15 +317,15 @@ fn load_logs(
             match cmd? {
                 Command::Set { key, .. } => {
                     // modify index to point to new data
-                    if let Some(ind) =
-                        index.insert(key, IndexEntry::new(file_id, offset, curr_offset))
-                    {
-                        inactive_data += ind.len;
+                    if let Some(ind) = index.get(&key) {
+                        inactive_data += ind.value().len;
                     }
+
+                    index.insert(key, IndexEntry::new(file_id, offset, curr_offset));
                 }
                 Command::Rm { key } => {
                     if let Some(ind) = index.remove(&key) {
-                        inactive_data += ind.len;
+                        inactive_data += ind.value().len;
                     }
                 }
             }

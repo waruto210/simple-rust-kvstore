@@ -19,6 +19,7 @@ sled = "0.34.6"
 crossbeam = "0.8.0"
 num_cpus = "1.13.0"
 rayon = "1.5.0"
+crossbeam-skiplist = { version = "0.0.0", git = "https://github.com/crossbeam-rs/crossbeam.git", branch = "master" }
 
 
 [dev-dependencies]
@@ -32,5 +33,5 @@ crossbeam-utils = "0.6.5"
 panic-control = "0.1.4"
 
 [[bench]]
-name = "engine_bench"
+name = "concurrency_bench"
 harness = false
