@@ -112,11 +112,13 @@ impl KvStore {
         if self.index.contains_key(&key) {
             let command = Command::rm(key);
             serde_json::to_writer(&mut self.writer, &command)?;
+            let offset = self.writer.cursor;
             self.writer.flush()?;
             if self.writer.cursor > MAX_FILE_SIZE {
                 self.file_id += 1;
                 self.writer = self.new_log_file(self.file_id)?;
             }
+            self.inactive_data += self.writer.cursor - offset;
             if let Some(index) = self.index.remove(&command.key()) {
                 self.inactive_data += index.len;
                 if self.inactive_data >= MAX_INACTIVE_DATA_SIZE {
@@ -174,6 +176,7 @@ impl KvStore {
             .collect();
 
         for file_id in inactive_file_ids {
+            self.readers.remove(&file_id);
             fs::remove_file(self.log_dir.join(format!("{}.log", file_id)))?;
         }
         self.inactive_data = 0;
@@ -361,6 +364,7 @@ impl<T: Write + Seek> Seek for CursorBufferWriter<T> {
     }
 }
 
+#[allow(unused_imports)]
 mod test {
 
     use crate::Result;
