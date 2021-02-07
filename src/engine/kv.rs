@@ -191,6 +191,7 @@ impl KvStore {
             .collect();
 
         for file_id in inactive_file_ids {
+            self.readers.remove(&file_id);
             fs::remove_file(self.log_dir.join(format!("{}.log", file_id)))?;
         }
         self.inactive_data = 0;
