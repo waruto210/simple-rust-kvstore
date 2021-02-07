@@ -182,3 +182,8 @@ pub struct KvStore {
 ![violin4](medias/violin4.svg)
 
 ![lines](medias/lines.svg)
+
+## 之外
+
+在查看talen-plan仓库中的示例solution之后，发现其中存在一些版本兼容性导致的直接Panic，已提交Pr修复。我将自己project4中的benchmark代码应用到示例solution中，发现测试一小段时间后，Tcp Server会崩溃，由于时间限制，暂未发现原因，如果有时间，会再查找。
+
