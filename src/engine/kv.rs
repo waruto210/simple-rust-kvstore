@@ -16,7 +16,7 @@ use crossbeam_skiplist::SkipMap;
 /// At most 2 MB inactive data
 const MAX_INACTIVE_DATA_SIZE: u64 = 1024 * 2048;
 /// max size of a single log's size
-const MAX_FILE_SIZE: u64 = 1024;
+const MAX_FILE_SIZE: u64 = 1024 * 2048;
 
 struct LogReader {
     index: Arc<SkipMap<String, IndexEntry>>,

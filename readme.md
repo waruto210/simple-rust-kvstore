@@ -171,13 +171,13 @@ pub struct KvStore {
 
 按照指引进行了 benchmark 测试，测试平台如 project3，结果如下：
 
-当 server 线程池线程数量在 2 时，平均耗时和抖动表现都很好，此后，服务表现出现恶化。
+随着server 线程池线程数量增加，平均响应时间有所改善，但是服务抖动很大。
 
 ![violin3](medias/violin3.svg)
 
 ![lines1](medias/lines1.svg)
 
-读取测试的结果与写入测试类似。猜测是因为并发导致的竞争，使得性能下降。
+读取测试的结果与写入测试类似。出现的波动可能是测试平台的其他服务干扰。
 
 ![violin4](medias/violin4.svg)
 

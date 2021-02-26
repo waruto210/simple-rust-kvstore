@@ -1,4 +1,5 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, SamplingMode};
+use crossbeam::sync::WaitGroup;
 use kvs::thread_pool::*;
 use kvs::{KvStore, KvsEngine, SledKvsEngine};
 use kvs::{KvsClient, KvsServer};
@@ -10,7 +11,6 @@ use std::sync::{
     Arc,
 };
 use std::thread;
-use std::{sync::mpsc, usize};
 use tempfile::TempDir;
 
 const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789)(*&^%$#@!~";
@@ -32,7 +32,10 @@ fn write(c: &mut Criterion) {
     group.sampling_mode(SamplingMode::Flat);
     group.sample_size(10);
     let num_cores = num_cpus::get();
-    let mut threads = (1..=num_cores).map(|i| 2 * i).collect::<Vec<usize>>();
+    let mut threads = (1..=num_cores)
+        .map(|i| 2 * i)
+        .filter(|&i| i <= num_cores)
+        .collect::<Vec<usize>>();
     threads.insert(0, 1);
 
     let mut rng = rand::thread_rng();
@@ -40,150 +43,134 @@ fn write(c: &mut Criterion) {
     for _ in 0..1000 {
         keys.push(get_key(&mut rng));
     }
-    let values = vec!["value".to_string(); 1000];
-    let request_pool = SharedQueueThreadPool::new(500).unwrap();
+    let values = vec!["value"; 1000];
+
     let port = 4000;
-    for thread_num in &threads {
+    for thread_num in threads {
+        let temp_dir = TempDir::new().unwrap();
+        let engine = KvStore::open(temp_dir.path()).unwrap();
+        let pool = SharedQueueThreadPool::new(thread_num.clone() as u32).unwrap();
+        let state = Arc::new(AtomicBool::new(true));
+        let mut server = KvsServer::new(engine, pool, state.clone());
+        thread::spawn(move || {
+            while let Err(_) = server.start(format!("127.0.0.1:{}", port + thread_num)) {
+                eprintln!("bind error");
+            }
+        });
         group.bench_with_input(
             BenchmarkId::new("write_queued_kvstore", thread_num),
-            thread_num,
-            |b, &thread_num| {
-                let temp_dir = TempDir::new().unwrap();
-                let engine = KvStore::open(temp_dir.path()).unwrap();
-                let pool = SharedQueueThreadPool::new(thread_num as u32).unwrap();
-                let state = Arc::new(AtomicBool::new(true));
-                let mut server = KvsServer::new(engine, pool, state.clone());
-                thread::spawn(move || {
-                    while let Err(_) = server.start(format!("127.0.0.1:{}", port)) {
-                        eprintln!("bind error");
-                    }
-                });
+            &thread_num,
+            |b, &_| {
                 b.iter(|| {
-                    let (tx, rx) = mpsc::channel();
+                    let wg = WaitGroup::new();
                     for i in 0..1000 {
-                        let sender = tx.clone();
+                        let wg = wg.clone();
                         let key = keys[i].clone();
-                        let value = values[i].clone();
-                        request_pool.spawn(move || {
-                            let mut client = KvsClient::connect(format!("127.0.0.1:{}", port));
+                        let value = values[i].to_owned();
+                        thread::spawn(move || {
+                            let mut client =
+                                KvsClient::connect(format!("127.0.0.1:{}", port + thread_num));
                             while let Err(_) = client {
-                                client = KvsClient::connect(format!("127.0.0.1:{}", port));
+                                client =
+                                    KvsClient::connect(format!("127.0.0.1:{}", port + thread_num));
                             }
                             let mut client = client.unwrap();
                             while let Err(e) = client.set(key.clone(), value.clone()) {
                                 eprintln!("set error {}", e);
                             }
-                            client.close();
-                            sender.send(i).unwrap();
+                            drop(wg);
                         });
                     }
-                    drop(tx);
-                    let mut count = 0;
-                    for _ in rx {
-                        count += 1;
-                        if count >= 1000 {
-                            break;
-                        }
-                    }
+                    wg.wait();
                 });
-                state.store(false, Ordering::SeqCst);
-                let _ = TcpStream::connect(format!("127.0.0.1:{}", port));
             },
         );
+        state.store(false, Ordering::SeqCst);
+        let _ = TcpStream::connect(format!("127.0.0.1:{}", port + thread_num));
 
+        let temp_dir = TempDir::new().unwrap();
+        let engine = KvStore::open(temp_dir.path()).unwrap();
+        let pool = RayonThreadPool::new(thread_num.clone() as u32).unwrap();
+        let state = Arc::new(AtomicBool::new(true));
+        let mut server = KvsServer::new(engine, pool, state.clone());
+        thread::spawn(move || {
+            while let Err(_) = server.start(format!("127.0.0.1:{}", port + thread_num)) {
+                eprintln!("bind error");
+            }
+        });
         group.bench_with_input(
             BenchmarkId::new("write_rayon_kvstore", thread_num),
-            thread_num,
-            |b, &thread_num| {
-                let temp_dir = TempDir::new().unwrap();
-                let engine = KvStore::open(temp_dir.path()).unwrap();
-                let pool = RayonThreadPool::new(thread_num as u32).unwrap();
-                let state = Arc::new(AtomicBool::new(true));
-                let mut server = KvsServer::new(engine, pool, state.clone());
-                thread::spawn(move || {
-                    while let Err(_) = server.start(format!("127.0.0.1:{}", port)) {
-                        eprintln!("bind error");
-                    }
-                });
+            &thread_num,
+            |b, _| {
                 b.iter(|| {
-                    let (tx, rx) = mpsc::channel();
+                    let wg = WaitGroup::new();
                     for i in 0..1000 {
-                        let sender = tx.clone();
+                        let wg = wg.clone();
                         let key = keys[i].clone();
-                        let value = values[i].clone();
-                        request_pool.spawn(move || {
-                            let mut client = KvsClient::connect(format!("127.0.0.1:{}", port));
+                        let value = values[i].to_owned();
+                        thread::spawn(move || {
+                            let mut client =
+                                KvsClient::connect(format!("127.0.0.1:{}", port + thread_num));
                             while let Err(_) = client {
-                                client = KvsClient::connect(format!("127.0.0.1:{}", port));
+                                client =
+                                    KvsClient::connect(format!("127.0.0.1:{}", port + thread_num));
                             }
                             let mut client = client.unwrap();
                             while let Err(e) = client.set(key.clone(), value.clone()) {
                                 eprintln!("set error {}", e);
                             }
                             client.close();
-                            sender.send(i).unwrap();
+                            drop(wg);
                         });
                     }
-                    drop(tx);
-                    let mut count = 0;
-                    for _ in rx {
-                        count += 1;
-                        if count >= 1000 {
-                            break;
-                        }
-                    }
+                    wg.wait();
                 });
-                state.store(false, Ordering::SeqCst);
-                let _ = TcpStream::connect(format!("127.0.0.1:{}", port));
             },
         );
+        state.store(false, Ordering::SeqCst);
+        let _ = TcpStream::connect(format!("127.0.0.1:{}", port + thread_num));
 
+        let temp_dir = TempDir::new().unwrap();
+        let engine = SledKvsEngine::open(temp_dir.path()).unwrap();
+        let pool = RayonThreadPool::new(thread_num as u32).unwrap();
+        let state = Arc::new(AtomicBool::new(true));
+        let mut server = KvsServer::new(engine, pool, state.clone());
+        thread::spawn(move || {
+            while let Err(_) = server.start(format!("127.0.0.1:{}", port + thread_num)) {
+                eprintln!("bind error");
+            }
+        });
         group.bench_with_input(
             BenchmarkId::new("write_rayon_sledkvengine", thread_num),
-            thread_num,
-            |b, &thread_num| {
-                let temp_dir = TempDir::new().unwrap();
-                let engine = SledKvsEngine::open(temp_dir.path()).unwrap();
-                let pool = RayonThreadPool::new(thread_num as u32).unwrap();
-                let state = Arc::new(AtomicBool::new(true));
-                let mut server = KvsServer::new(engine, pool, state.clone());
-                thread::spawn(move || {
-                    while let Err(_) = server.start(format!("127.0.0.1:{}", port)) {
-                        eprintln!("bind error");
-                    }
-                });
+            &thread_num,
+            |b, _| {
                 b.iter(|| {
-                    let (tx, rx) = mpsc::channel();
+                    let wg = WaitGroup::new();
                     for i in 0..1000 {
-                        let sender = tx.clone();
+                        let wg = wg.clone();
                         let key = keys[i].clone();
-                        let value = values[i].clone();
-                        request_pool.spawn(move || {
-                            let mut client = KvsClient::connect(format!("127.0.0.1:{}", port));
+                        let value = values[i].to_owned();
+                        thread::spawn(move || {
+                            let mut client =
+                                KvsClient::connect(format!("127.0.0.1:{}", port + thread_num));
                             while let Err(_) = client {
-                                client = KvsClient::connect(format!("127.0.0.1:{}", port));
+                                client =
+                                    KvsClient::connect(format!("127.0.0.1:{}", port + thread_num));
                             }
                             let mut client = client.unwrap();
                             while let Err(e) = client.set(key.clone(), value.clone()) {
                                 eprintln!("set error {}", e);
                             }
                             client.close();
-                            sender.send(i).unwrap();
+                            drop(wg);
                         });
                     }
-                    drop(tx);
-                    let mut count = 0;
-                    for _ in rx {
-                        count += 1;
-                        if count >= 1000 {
-                            break;
-                        }
-                    }
+                    wg.wait();
                 });
-                state.store(false, Ordering::SeqCst);
-                let _ = TcpStream::connect(format!("127.0.0.1:{}", port));
             },
         );
+        state.store(false, Ordering::SeqCst);
+        let _ = TcpStream::connect(format!("127.0.0.1:{}", port));
     }
 
     group.finish();
@@ -194,7 +181,10 @@ fn read(c: &mut Criterion) {
     group.sampling_mode(SamplingMode::Flat);
     group.sample_size(10);
     let num_cores = num_cpus::get();
-    let mut threads = (1..=num_cores).map(|i| 2 * i).collect::<Vec<usize>>();
+    let mut threads = (1..=num_cores)
+        .map(|i| 2 * i)
+        .filter(|&i| i <= num_cores)
+        .collect::<Vec<usize>>();
     threads.insert(0, 1);
 
     let mut rng = rand::thread_rng();
@@ -202,159 +192,141 @@ fn read(c: &mut Criterion) {
     for _ in 0..1000 {
         keys.push(get_key(&mut rng));
     }
-    let values = vec!["value".to_string(); 1000];
-    let request_pool = SharedQueueThreadPool::new(500).unwrap();
-    let port = 4001;
-    for thread_num in &threads {
+    let values = vec!["value"; 1000];
+    let port = 5001;
+
+    for thread_num in threads {
+        let temp_dir = TempDir::new().unwrap();
+        let engine = KvStore::open(temp_dir.path()).unwrap();
+        let pool = SharedQueueThreadPool::new(thread_num as u32).unwrap();
+        let state = Arc::new(AtomicBool::new(true));
+        // directly use engine to set, use client is too slow to prepare
+        for i in 0..1000 {
+            engine.set(keys[i].clone(), values[i].to_owned()).unwrap();
+        }
+        let mut server = KvsServer::new(engine, pool, state.clone());
+        thread::spawn(move || {
+            while let Err(_) = server.start(format!("127.0.0.1:{}", port + thread_num)) {
+                eprintln!("error bind");
+            }
+        });
         group.bench_with_input(
             BenchmarkId::new("read_queued_kvstore", thread_num),
-            thread_num,
-            |b, &thread_num| {
-                let temp_dir = TempDir::new().unwrap();
-                let engine = KvStore::open(temp_dir.path()).unwrap();
-                let pool = SharedQueueThreadPool::new(thread_num as u32).unwrap();
-                let state = Arc::new(AtomicBool::new(true));
-                // directly use engine to set, use client is too slow to prepare
-                for i in 0..1000 {
-                    engine.set(keys[i].clone(), values[i].clone()).unwrap();
-                }
-                let mut server = KvsServer::new(engine, pool, state.clone());
-                thread::spawn(move || {
-                    while let Err(_) = server.start(format!("127.0.0.1:{}", port)) {
-                        eprintln!("error bind");
-                    }
-                });
-
+            &thread_num,
+            |b, _| {
                 b.iter(|| {
-                    let (tx, rx) = mpsc::channel();
+                    let wg = WaitGroup::new();
                     for i in 0..1000 {
-                        let sender = tx.clone();
+                        let wg = wg.clone();
                         let key = keys[i].clone();
-                        let value = values[i].clone();
-                        request_pool.spawn(move || {
-                            let mut client = KvsClient::connect(format!("127.0.0.1:{}", port));
+                        let value = values[i].to_owned();
+                        thread::spawn(move || {
+                            let mut client =
+                                KvsClient::connect(format!("127.0.0.1:{}", port + thread_num));
                             while let Err(_) = client {
-                                client = KvsClient::connect(format!("127.0.0.1:{}", port));
+                                client =
+                                    KvsClient::connect(format!("127.0.0.1:{}", port + thread_num));
                             }
                             let mut client = client.unwrap();
                             assert_eq!(client.get(key.clone()).unwrap(), Some(value.clone()));
                             client.close();
-                            sender.send(i).unwrap();
+                            drop(wg);
                         });
                     }
-                    drop(tx);
-                    let mut count = 0;
-                    for _ in rx {
-                        count += 1;
-                        if count >= 1000 {
-                            break;
-                        }
-                    }
+                    wg.wait();
                 });
-                state.store(false, Ordering::SeqCst);
-                let _ = TcpStream::connect(format!("127.0.0.1:{}", port));
             },
         );
+        state.store(false, Ordering::SeqCst);
+        let _ = TcpStream::connect(format!("127.0.0.1:{}", port + thread_num));
 
+        let temp_dir = TempDir::new().unwrap();
+        let engine = KvStore::open(temp_dir.path()).unwrap();
+        let pool = RayonThreadPool::new(thread_num as u32).unwrap();
+        let state = Arc::new(AtomicBool::new(true));
+        // directly use engine to set, use client is too slow to prepare
+        for i in 0..1000 {
+            engine.set(keys[i].clone(), values[i].to_owned()).unwrap();
+        }
+        let mut server = KvsServer::new(engine, pool, state.clone());
+        thread::spawn(move || {
+            while let Err(_) = server.start(format!("127.0.0.1:{}", port + thread_num)) {
+                eprintln!("error bind");
+            }
+        });
         group.bench_with_input(
             BenchmarkId::new("read_rayon_kvstore", thread_num),
-            thread_num,
-            |b, &thread_num| {
-                let temp_dir = TempDir::new().unwrap();
-                let engine = KvStore::open(temp_dir.path()).unwrap();
-                let pool = RayonThreadPool::new(thread_num as u32).unwrap();
-                let state = Arc::new(AtomicBool::new(true));
-                // directly use engine to set, use client is too slow to prepare
-                for i in 0..1000 {
-                    engine.set(keys[i].clone(), values[i].clone()).unwrap();
-                }
-                let mut server = KvsServer::new(engine, pool, state.clone());
-                thread::spawn(move || {
-                    while let Err(_) = server.start(format!("127.0.0.1:{}", port)) {
-                        eprintln!("error bind");
-                    }
-                });
-
+            &thread_num,
+            |b, _| {
                 b.iter(|| {
-                    let (tx, rx) = mpsc::channel();
+                    let wg = WaitGroup::new();
                     for i in 0..1000 {
-                        let sender = tx.clone();
+                        let wg = wg.clone();
                         let key = keys[i].clone();
-                        let value = values[i].clone();
-                        request_pool.spawn(move || {
-                            let mut client = KvsClient::connect(format!("127.0.0.1:{}", port));
+                        let value = values[i].to_owned();
+                        thread::spawn(move || {
+                            let mut client =
+                                KvsClient::connect(format!("127.0.0.1:{}", port + thread_num));
                             while let Err(_) = client {
-                                client = KvsClient::connect(format!("127.0.0.1:{}", port));
+                                client =
+                                    KvsClient::connect(format!("127.0.0.1:{}", port + thread_num));
                             }
                             let mut client = client.unwrap();
                             assert_eq!(client.get(key.clone()).unwrap(), Some(value.clone()));
                             client.close();
-                            sender.send(i).unwrap();
+                            drop(wg);
                         });
                     }
-                    drop(tx);
-                    let mut count = 0;
-                    for _ in rx {
-                        count += 1;
-                        if count >= 1000 {
-                            break;
-                        }
-                    }
+                    wg.wait();
                 });
-                state.store(false, Ordering::SeqCst);
-                let _ = TcpStream::connect(format!("127.0.0.1:{}", port));
             },
         );
+        state.store(false, Ordering::SeqCst);
+        let _ = TcpStream::connect(format!("127.0.0.1:{}", port + thread_num));
 
+        let temp_dir = TempDir::new().unwrap();
+        let engine = SledKvsEngine::open(temp_dir.path()).unwrap();
+        let pool = RayonThreadPool::new(thread_num as u32).unwrap();
+        let state = Arc::new(AtomicBool::new(true));
+        // directly use engine to set, use client is too slow to prepare
+        for i in 0..1000 {
+            engine.set(keys[i].clone(), values[i].to_owned()).unwrap();
+        }
+        let mut server = KvsServer::new(engine, pool, state.clone());
+        thread::spawn(move || {
+            while let Err(_) = server.start(format!("127.0.0.1:{}", port + thread_num)) {
+                eprintln!("error bind");
+            }
+        });
         group.bench_with_input(
             BenchmarkId::new("read_rayon_sledkvengine", thread_num),
-            thread_num,
-            |b, &thread_num| {
-                let temp_dir = TempDir::new().unwrap();
-                let engine = SledKvsEngine::open(temp_dir.path()).unwrap();
-                let pool = RayonThreadPool::new(thread_num as u32).unwrap();
-                let state = Arc::new(AtomicBool::new(true));
-                // directly use engine to set, use client is too slow to prepare
-                for i in 0..1000 {
-                    engine.set(keys[i].clone(), values[i].clone()).unwrap();
-                }
-                let mut server = KvsServer::new(engine, pool, state.clone());
-                thread::spawn(move || {
-                    while let Err(_) = server.start(format!("127.0.0.1:{}", port)) {
-                        eprintln!("error bind");
-                    }
-                });
-
+            &thread_num,
+            |b, _| {
                 b.iter(|| {
-                    let (tx, rx) = mpsc::channel();
+                    let wg = WaitGroup::new();
                     for i in 0..1000 {
-                        let sender = tx.clone();
+                        let wg = wg.clone();
                         let key = keys[i].clone();
-                        let value = values[i].clone();
-                        request_pool.spawn(move || {
-                            let mut client = KvsClient::connect(format!("127.0.0.1:{}", port));
+                        let value = values[i].to_owned();
+                        thread::spawn(move || {
+                            let mut client =
+                                KvsClient::connect(format!("127.0.0.1:{}", port + thread_num));
                             while let Err(_) = client {
-                                client = KvsClient::connect(format!("127.0.0.1:{}", port));
+                                client =
+                                    KvsClient::connect(format!("127.0.0.1:{}", port + thread_num));
                             }
                             let mut client = client.unwrap();
                             assert_eq!(client.get(key.clone()).unwrap(), Some(value.clone()));
                             client.close();
-                            sender.send(i).unwrap();
+                            drop(wg);
                         });
                     }
-                    drop(tx);
-                    let mut count = 0;
-                    for _ in rx {
-                        count += 1;
-                        if count >= 1000 {
-                            break;
-                        }
-                    }
+                    wg.wait();
                 });
-                state.store(false, Ordering::SeqCst);
-                let _ = TcpStream::connect(format!("127.0.0.1:{}", port));
             },
         );
+        state.store(false, Ordering::SeqCst);
+        let _ = TcpStream::connect(format!("127.0.0.1:{}", port + thread_num));
     }
 
     group.finish();
