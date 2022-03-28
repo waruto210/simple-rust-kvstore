@@ -1,5 +1,7 @@
 use super::KvsEngine;
 use crate::{KvsError, Result};
+use async_trait::async_trait;
+use crossbeam_skiplist::SkipMap;
 use fs::OpenOptions;
 use io::BufWriter;
 use serde::{Deserialize, Serialize};
@@ -10,17 +12,21 @@ use std::path::Path;
 use std::sync::{atomic, Arc, Mutex};
 use std::{cell::RefCell, ffi::OsStr};
 use std::{io::BufReader, path::PathBuf, u64, usize};
-// use crossbeam_skiplist::{SkipList, SkipMap};
-use crossbeam_skiplist::SkipMap;
+use tokio::task::block_in_place;
 
 /// At most 2 MB inactive data
 const MAX_INACTIVE_DATA_SIZE: u64 = 1024 * 2048;
 /// max size of a single log's size
 const MAX_FILE_SIZE: u64 = 1024 * 2048;
 
+#[allow(unsafe_code)]
+
+unsafe impl Send for LogReader {}
+unsafe impl Sync for LogReader {}
+
 struct LogReader {
     index: Arc<SkipMap<String, IndexEntry>>,
-    file_id_bar: Arc<atomic::AtomicU64>,
+    inactive_file_id_top: Arc<atomic::AtomicU64>,
     log_dir: PathBuf,
     // need interior mutability of refcell
     readers: RefCell<HashMap<u64, CursorBufferReader<File>>>,
@@ -30,7 +36,7 @@ impl Clone for LogReader {
     fn clone(&self) -> Self {
         LogReader {
             index: Arc::clone(&self.index),
-            file_id_bar: Arc::clone(&self.file_id_bar),
+            inactive_file_id_top: Arc::clone(&self.inactive_file_id_top),
             log_dir: self.log_dir.clone(),
             readers: RefCell::new(HashMap::new()),
         }
@@ -67,7 +73,7 @@ impl LogReader {
     }
 
     fn clean_readers(&self) {
-        let file_id_bar = self.file_id_bar.load(atomic::Ordering::SeqCst);
+        let file_id_bar = self.inactive_file_id_top.load(atomic::Ordering::SeqCst);
 
         let keys = self
             .readers
@@ -169,7 +175,7 @@ impl LogWriter {
         self.writer = new_log_file(self.file_id, &self.log_dir)?;
 
         self.reader
-            .file_id_bar
+            .inactive_file_id_top
             .store(origin_compaction_file_id, atomic::Ordering::SeqCst);
 
         let inactive_file_ids = get_file_ids(&self.log_dir)?
@@ -211,6 +217,7 @@ pub struct KvStore {
     writer: Arc<Mutex<LogWriter>>,
 }
 
+#[async_trait]
 impl KvsEngine for KvStore {
     /// Set the string value of a given string key.
     ///
@@ -219,8 +226,8 @@ impl KvsEngine for KvStore {
     /// # Errors
     ///
     /// Errors may be thrown when I/O and serializing
-    fn set(&self, key: String, value: String) -> Result<()> {
-        self.writer.lock().unwrap().set(key, value)
+    async fn set(&self, key: String, value: String) -> Result<()> {
+        block_in_place(move || self.writer.lock().unwrap().set(key, value))
     }
 
     /// Get the string value of a given string key.
@@ -230,8 +237,8 @@ impl KvsEngine for KvStore {
     /// # Errors
     ///
     /// Errors may be thrown when I/O and serializing
-    fn get(&self, key: String) -> Result<Option<String>> {
-        self.reader.get(key)
+    async fn get(&self, key: String) -> Result<Option<String>> {
+        block_in_place(move || self.reader.get(key))
     }
 
     /// Remove a given string key.
@@ -240,8 +247,8 @@ impl KvsEngine for KvStore {
     ///
     /// Returns `KvsError::KeyNotFound` if the given ket does not exixt.
     /// Errors may be thrown when I/O and serializing
-    fn remove(&self, key: String) -> Result<()> {
-        self.writer.lock().unwrap().remove(key)
+    async fn remove(&self, key: String) -> Result<()> {
+        block_in_place(move || self.writer.lock().unwrap().remove(key))
     }
 }
 
@@ -266,7 +273,7 @@ impl KvStore {
             index: index.clone(),
             log_dir: PathBuf::clone(&log_dir),
             readers: RefCell::new(readers),
-            file_id_bar: Arc::new(atomic::AtomicU64::new(0)),
+            inactive_file_id_top: Arc::new(atomic::AtomicU64::new(0)),
         };
         let writer = Arc::new(Mutex::new(LogWriter {
             reader: reader.clone(),

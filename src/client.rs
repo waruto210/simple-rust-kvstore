@@ -1,68 +1,94 @@
-use crate::{protocol, KvsError, Result};
-use serde::Deserialize;
-use serde_json::de::{Deserializer, IoRead};
-use std::{io::Write, net::TcpStream};
-use std::{
-    io::{BufReader, BufWriter},
-    net::ToSocketAddrs,
+use crate::{
+    protocol::{Request, Response},
+    KvsError, Result,
 };
+use futures::prelude::*;
+use tokio::{
+    io::{BufReader, BufWriter},
+    net::{
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+        TcpStream, ToSocketAddrs,
+    },
+};
+use tokio_serde::formats::SymmetricalJson;
+use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 /// A k/v store client
 pub struct KvsClient {
-    sender: BufWriter<TcpStream>,
+    // sender: BufWriter<TcpStream>,
     // because the from_reader method needs input stream end
     // so receiver is not a simple BufReader
     // https://docs.serde.rs/serde_json/fn.from_reader.html
-    receiver: Deserializer<IoRead<BufReader<TcpStream>>>,
+    // receiver: Deserializer<IoRead<BufReader<TcpStream>>>,
+    reader: tokio_serde::SymmetricallyFramed<
+        FramedRead<OwnedReadHalf, LengthDelimitedCodec>,
+        Response,
+        SymmetricalJson<Response>,
+    >,
+    writer: tokio_serde::SymmetricallyFramed<
+        FramedWrite<OwnedWriteHalf, LengthDelimitedCodec>,
+        Request,
+        SymmetricalJson<Request>,
+    >,
 }
 
 impl KvsClient {
     /// connect to a `KvsServer`
-    pub fn connect<A>(addr: A) -> Result<KvsClient>
+    pub async fn connect<A>(addr: A) -> Result<KvsClient>
     where
         A: ToSocketAddrs,
     {
-        let stream = TcpStream::connect(addr)?;
+        let stream = TcpStream::connect(addr).await?;
 
-        Ok(KvsClient {
-            sender: BufWriter::new(stream.try_clone()?),
-            receiver: Deserializer::from_reader(BufReader::new(stream)),
-        })
+        let (read_half, write_half) = stream.into_split();
+        // let buf_reader = BufReader::new(read_half);
+        // let buf_writer = BufWriter::new(write_half);
+
+        let reader = tokio_serde::SymmetricallyFramed::new(
+            FramedRead::new(read_half, LengthDelimitedCodec::new()),
+            SymmetricalJson::<Response>::default(),
+        );
+        let writer = tokio_serde::SymmetricallyFramed::new(
+            FramedWrite::new(write_half, LengthDelimitedCodec::new()),
+            SymmetricalJson::<Request>::default(),
+        );
+
+        Ok(KvsClient { reader, writer })
     }
 
     /// Set the string value of a given string key.
-    pub fn set(&mut self, key: String, value: String) -> Result<()> {
-        let req = protocol::Request::Set { key, value };
-        serde_json::to_writer(&mut self.sender, &req)?;
-        self.sender.flush()?;
-        let response = protocol::Response::deserialize(&mut self.receiver)?;
-        match response {
-            protocol::Response::Ok(_) => Ok(()),
-            protocol::Response::Err(err) => Err(KvsError::StringError(err)),
+    pub async fn set(&mut self, key: String, value: String) -> Result<()> {
+        let resp = self.send_and_receive(Request::Set { key, value }).await?;
+        match resp {
+            Response::Ok(_) => Ok(()),
+            Response::Err(e) => Err(KvsError::StringError(e)),
         }
     }
 
     /// Get the string value of a given string key.
-    pub fn get(&mut self, key: String) -> Result<Option<String>> {
-        let req = protocol::Request::Get { key };
-        serde_json::to_writer(&mut self.sender, &req)?;
-        self.sender.flush()?;
-        let response = protocol::Response::deserialize(&mut self.receiver)?;
-        match response {
-            protocol::Response::Ok(value) => Ok(value),
-            protocol::Response::Err(err) => Err(KvsError::StringError(err)),
+    pub async fn get(&mut self, key: String) -> Result<Option<String>> {
+        let resp = self.send_and_receive(Request::Get { key }).await?;
+        match resp {
+            Response::Ok(v) => Ok(v),
+            Response::Err(e) => Err(KvsError::StringError(e)),
         }
     }
 
     /// Remove a given string key.
-    pub fn remove(&mut self, key: String) -> Result<()> {
-        let req = protocol::Request::Rm { key };
-        serde_json::to_writer(&mut self.sender, &req)?;
-        self.sender.flush()?;
-        let response = protocol::Response::deserialize(&mut self.receiver)?;
-        match response {
-            protocol::Response::Ok(_) => Ok(()),
-            protocol::Response::Err(err) => Err(KvsError::StringError(err)),
+    pub async fn remove(&mut self, key: String) -> Result<()> {
+        let resp = self.send_and_receive(Request::Rm { key }).await?;
+        match resp {
+            Response::Ok(_) => Ok(()),
+            Response::Err(e) => Err(KvsError::StringError(e)),
+        }
+    }
+
+    /// send a request and receive a response
+    pub async fn send_and_receive(&mut self, req: Request) -> Result<Response> {
+        self.writer.send(req).await?;
+        match self.reader.try_next().await? {
+            Some(resp) => Ok(resp),
+            _ => Err(KvsError::StringError("can't receive".to_string())),
         }
     }
 

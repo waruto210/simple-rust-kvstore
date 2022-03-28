@@ -2,6 +2,8 @@ use kvs::{KvsClient, Result};
 use std::net::SocketAddr;
 use std::process::exit;
 use structopt::StructOpt;
+use tokio;
+
 const DEFAULT_ADDRESS: &str = "127.0.0.1:4000";
 
 #[derive(Debug, StructOpt)]
@@ -59,30 +61,34 @@ pub enum Command {
 }
 fn main() {
     let opt = ClientArgs::from_args();
-    if let Err(err) = run(opt) {
-        eprintln!("{}", err);
-        exit(1);
-    }
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async move {
+        if let Err(err) = run(opt).await {
+            eprintln!("{}", err);
+            exit(1);
+        }
+    });
 }
 
-fn run(opt: ClientArgs) -> Result<()> {
+async fn run(opt: ClientArgs) -> Result<()> {
     match opt.command {
         Command::Set { key, value, addr } => {
             // println!("set {} {} {}", key, value, addr);
-            let mut client = KvsClient::connect(addr)?;
-            client.set(key, value)?;
+            let mut client = KvsClient::connect(addr).await?;
+            client.set(key, value).await?;
         }
         Command::Get { key, addr } => {
-            let mut client = KvsClient::connect(addr)?;
-            if let Some(value) = client.get(key)? {
+            let mut client = KvsClient::connect(addr).await?;
+            if let Some(value) = client.get(key).await? {
                 println!("{}", value);
             } else {
                 println!("Key not found");
             }
         }
         Command::Remove { key, addr } => {
-            let mut client = KvsClient::connect(addr)?;
-            client.remove(key)?;
+            let mut client = KvsClient::connect(addr).await?;
+            client.remove(key).await?;
         }
     }
     Ok(())

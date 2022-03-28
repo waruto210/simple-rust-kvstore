@@ -1,17 +1,19 @@
 use clap::arg_enum;
 use env_logger::Builder;
-use kvs::thread_pool::*;
 use kvs::Result;
 use kvs::{KvStore, KvsEngine, KvsServer, SledKvsEngine};
 use log::{error, info, LevelFilter};
 use num_cpus;
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::net::SocketAddr;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::{env::current_dir, process::exit};
-use std::{fs, net::ToSocketAddrs};
 use structopt::StructOpt;
+use tokio;
+use tokio::net::ToSocketAddrs;
+
 const DEFAULT_ADDRESS: &str = "127.0.0.1:4000";
 
 arg_enum! {
@@ -43,7 +45,7 @@ pub struct ServerArgs {
     engine: Option<Engine>,
 }
 fn main() {
-    Builder::new().filter_level(LevelFilter::Info).init();
+    Builder::new().filter_level(LevelFilter::Debug).init();
     let opt = ServerArgs::from_args();
     if let Err(err) = init(opt) {
         eprintln!("{}", err);
@@ -65,11 +67,12 @@ fn init(opt: ServerArgs) -> Result<()> {
     }
 }
 
-fn start(engine: impl KvsEngine, addr: impl ToSocketAddrs) -> Result<()> {
-    let pool = RayonThreadPool::new(num_cpus::get() as u32)?;
+fn start(engine: impl KvsEngine + Sync, addr: impl ToSocketAddrs) -> Result<()> {
     let state = Arc::new(AtomicBool::new(true));
-    let mut server = KvsServer::new(engine, pool, state);
-    server.start(addr)
+    let mut server = KvsServer::new(engine, state);
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let _ = rt.block_on(server.start(addr));
+    Ok(())
 }
 
 fn determine_engine(opt: &ServerArgs) -> Result<Engine> {

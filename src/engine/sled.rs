@@ -1,7 +1,9 @@
 use crate::Result;
 use crate::{KvsEngine, KvsError};
+use async_trait::async_trait;
 use sled;
 use std::path::PathBuf;
+use tokio::task::block_in_place;
 
 /// The `SledKvsEngine` is used to store Key/Value pairs based on `sled`.
 /// Example:
@@ -35,30 +37,37 @@ impl SledKvsEngine {
     }
 }
 
+#[async_trait]
 impl KvsEngine for SledKvsEngine {
-    fn set(&self, key: String, value: String) -> Result<()> {
-        self.db.insert(key.as_str(), value.as_str())?;
-        self.db.flush()?;
-        Ok(())
-    }
-
-    fn get(&self, key: String) -> Result<Option<String>> {
-        let value = self.db.get(key.as_str())?.map(|ivec| ivec.to_vec());
-        if let Some(value) = value {
-            let s = String::from_utf8(value)?;
-            Ok(Some(s))
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn remove(&self, key: String) -> Result<()> {
-        let old_value = self.db.remove(key.as_str())?;
-        if let Some(_) = old_value {
+    async fn set(&self, key: String, value: String) -> Result<()> {
+        block_in_place(move || {
+            self.db.insert(key.as_str(), value.as_str())?;
             self.db.flush()?;
             Ok(())
-        } else {
-            Err(KvsError::KeyNotFound)
-        }
+        })
+    }
+
+    async fn get(&self, key: String) -> Result<Option<String>> {
+        block_in_place(move || {
+            let value = self.db.get(key.as_str())?.map(|ivec| ivec.to_vec());
+            if let Some(value) = value {
+                let s = String::from_utf8(value)?;
+                Ok(Some(s))
+            } else {
+                Ok(None)
+            }
+        })
+    }
+
+    async fn remove(&self, key: String) -> Result<()> {
+        block_in_place(move || {
+            let old_value = self.db.remove(key.as_str())?;
+            if let Some(_) = old_value {
+                self.db.flush()?;
+                Ok(())
+            } else {
+                Err(KvsError::KeyNotFound)
+            }
+        })
     }
 }

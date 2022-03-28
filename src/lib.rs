@@ -9,6 +9,5 @@ mod client;
 mod engine;
 mod err;
 mod protocol;
-mod server;
-/// ThreadPool
-pub mod thread_pool;
+/// A simple string key/value store Server
+pub mod server;
