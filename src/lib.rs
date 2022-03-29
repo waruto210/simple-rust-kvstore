@@ -2,9 +2,9 @@
 //! A simple string key/value store
 pub use client::KvsClient;
 pub use engine::{KvStore, KvsEngine, SledKvsEngine};
-pub use err::{KvsError, Result};
+pub use err::KvsError;
+pub(crate) use err::Result;
 pub use server::KvsServer;
-
 mod client;
 mod engine;
 mod err;

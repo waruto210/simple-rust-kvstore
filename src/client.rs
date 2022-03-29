@@ -9,7 +9,6 @@ use tokio::net::{
 };
 use tokio_serde::formats::SymmetricalJson;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
-
 /// A k/v store client
 pub struct KvsClient {
     // sender: BufWriter<TcpStream>,
@@ -56,7 +55,7 @@ impl KvsClient {
         let resp = self.send_and_receive(Request::Set { key, value }).await?;
         match resp {
             Response::Ok(_) => Ok(()),
-            Response::Err(e) => Err(KvsError::StringError(e)),
+            Response::Err(e) => Err(KvsError::OtherError(e).into()),
         }
     }
 
@@ -65,7 +64,7 @@ impl KvsClient {
         let resp = self.send_and_receive(Request::Get { key }).await?;
         match resp {
             Response::Ok(v) => Ok(v),
-            Response::Err(e) => Err(KvsError::StringError(e)),
+            Response::Err(e) => Err(KvsError::OtherError(e).into()),
         }
     }
 
@@ -74,7 +73,7 @@ impl KvsClient {
         let resp = self.send_and_receive(Request::Rm { key }).await?;
         match resp {
             Response::Ok(_) => Ok(()),
-            Response::Err(e) => Err(KvsError::StringError(e)),
+            Response::Err(e) => Err(KvsError::OtherError(e).into()),
         }
     }
 
@@ -83,7 +82,7 @@ impl KvsClient {
         self.writer.send(req).await?;
         match self.reader.try_next().await? {
             Some(resp) => Ok(resp),
-            _ => Err(KvsError::StringError("can't receive".to_string())),
+            _ => Err(KvsError::OtherError("can't receive".to_string()).into()),
         }
     }
 

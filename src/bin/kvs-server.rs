@@ -1,6 +1,6 @@
+use anyhow::{Context, Result};
 use clap::arg_enum;
 use env_logger::Builder;
-use kvs::Result;
 use kvs::{KvStore, KvsEngine, KvsServer, SledKvsEngine};
 use log::{error, info, LevelFilter};
 use serde::{Deserialize, Serialize};
@@ -44,7 +44,7 @@ pub struct ServerArgs {
     engine: Option<Engine>,
 }
 fn main() {
-    Builder::new().filter_level(LevelFilter::Debug).init();
+    Builder::new().filter_level(LevelFilter::Info).init();
     let opt = ServerArgs::from_args();
     if let Err(err) = init(opt) {
         eprintln!("{}", err);
@@ -69,7 +69,7 @@ fn init(opt: ServerArgs) -> Result<()> {
 fn start(engine: impl KvsEngine + Sync, addr: impl ToSocketAddrs) -> Result<()> {
     let state = Arc::new(AtomicBool::new(true));
     let mut server = KvsServer::new(engine, state);
-    let rt = tokio::runtime::Runtime::new().unwrap();
+    let rt = tokio::runtime::Runtime::new().context("failed to create tokio runtime")?;
     let _ = rt.block_on(server.start(addr));
     Ok(())
 }

@@ -50,7 +50,7 @@ impl LogReader {
             if let Command::Set { value, .. } = cmd {
                 Ok(Some(value))
             } else {
-                Err(KvsError::BrokenCommand)
+                Err(KvsError::BrokenCommand.into())
             }
         } else {
             // not an error, beaause we need to exit normally with code 0
@@ -136,10 +136,10 @@ impl LogWriter {
                 if let Some(index) = self.index.remove(&command.key()) {
                     self.inactive_data += index.value().len;
                 } else {
-                    return Err(KvsError::BrokenIndex);
+                    return Err(KvsError::BrokenIndex.into());
                 }
             } else {
-                return Err(KvsError::KeyNotFound);
+                return Err(KvsError::KeyNotFound.into());
             }
         }
         if self.inactive_data >= MAX_INACTIVE_DATA_SIZE {
@@ -196,18 +196,21 @@ impl LogWriter {
 /// Example:
 ///
 /// ```rust
-/// # use kvs::{KvStore, Result};
+/// # use anyhow::{Result, Context};
 /// use std::env::current_dir;
-/// use kvs::KvsEngine;
-/// fn main() -> Result<()> {
-/// let mut store = KvStore::open(current_dir()?)?;
-/// store.set("key".to_string(), "value".to_string())?;
-/// store.set("key1".to_string(), "value1".to_string())?;
-/// store.remove("key1".to_string())?;
-/// assert_eq!(store.get("key".to_string())?, Some("value".to_string()));
-/// assert_eq!(store.get("key1".to_string())?, None);
-/// Ok(())
-/// }
+/// use kvs::{KvsEngine, KvStore};
+/// # fn main() -> Result<()> {
+/// let rt = tokio::runtime::Runtime::new().context("failed to create tokio runtime")?;
+/// rt.block_on(async move {
+///     let mut store = KvStore::open(current_dir()?)?;
+///     store.set("key".to_string(), "value".to_string()).await?;
+///     store.set("key1".to_string(), "value1".to_string()).await?;
+///     store.remove("key1".to_string()).await?;
+///     assert_eq!(store.get("key".to_string()).await?, Some("value".to_string()));
+///     assert_eq!(store.get("key1".to_string()).await?, None);
+///     Ok(())
+/// })
+/// # }
 ///```
 
 #[derive(Clone)]

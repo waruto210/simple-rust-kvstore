@@ -1,5 +1,5 @@
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, SamplingMode};
-use crossbeam::sync::WaitGroup;
+use awaitgroup::WaitGroup;
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use kvs::server::close_server;
 use kvs::{KvStore, KvsEngine, SledKvsEngine};
 use kvs::{KvsClient, KvsServer};
@@ -25,8 +25,6 @@ fn get_key(rng: &mut ThreadRng) -> String {
 
 fn write(c: &mut Criterion) {
     let mut group = c.benchmark_group("write");
-    group.sampling_mode(SamplingMode::Flat);
-    group.sample_size(10);
 
     let threads = vec![1, 2, 4, 8, 16];
 
@@ -129,8 +127,6 @@ fn write(c: &mut Criterion) {
 
 fn read(c: &mut Criterion) {
     let mut group = c.benchmark_group("read");
-    group.sampling_mode(SamplingMode::Flat);
-    group.sample_size(10);
 
     let threads = vec![1, 2, 4, 8, 16];
 
@@ -255,9 +251,9 @@ async fn async_sets(
     port: usize,
     thread_num: usize,
 ) {
-    let wg = WaitGroup::new();
+    let mut wg = WaitGroup::new();
     for i in 0..1000 {
-        let wg = wg.clone();
+        let worker = wg.worker();
         let key = keys[i].clone();
         let value = values[i].to_owned();
         tokio::spawn(async move {
@@ -270,10 +266,10 @@ async fn async_sets(
             if let Err(e) = client.set(key.clone(), value.clone()).await {
                 eprintln!("set error {}", e);
             }
-            drop(wg);
+            drop(worker);
         });
     }
-    wg.wait();
+    wg.wait().await;
 }
 
 async fn async_gets(
@@ -282,9 +278,9 @@ async fn async_gets(
     port: usize,
     thread_num: usize,
 ) {
-    let wg = WaitGroup::new();
+    let mut wg = WaitGroup::new();
     for i in 0..1000 {
-        let wg = wg.clone();
+        let worker = wg.worker();
         let key = keys[i].clone();
         let value = values[i].to_owned();
         tokio::spawn(async move {
@@ -295,10 +291,10 @@ async fn async_gets(
             let mut client = client.unwrap();
             assert_eq!(client.get(key.clone()).await.unwrap(), Some(value.clone()));
             client.close();
-            drop(wg);
+            drop(worker);
         });
     }
-    wg.wait();
+    wg.wait().await;
 }
 
 criterion_group!(benches, write, read);

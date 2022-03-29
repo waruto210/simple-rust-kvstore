@@ -1,4 +1,5 @@
-use kvs::{KvsClient, Result};
+use anyhow::{Context, Result};
+use kvs::KvsClient;
 use std::net::SocketAddr;
 use std::process::exit;
 use structopt::StructOpt;
@@ -59,16 +60,18 @@ pub enum Command {
         addr: SocketAddr,
     },
 }
-fn main() {
+fn main() -> Result<()> {
     let opt = ClientArgs::from_args();
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
+    let rt = tokio::runtime::Runtime::new().context("failed to create tokio runtime")?;
     rt.block_on(async move {
         if let Err(err) = run(opt).await {
             eprintln!("{}", err);
             exit(1);
         }
     });
+
+    Ok(())
 }
 
 async fn run(opt: ClientArgs) -> Result<()> {

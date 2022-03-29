@@ -9,18 +9,21 @@ use tokio::task::block_in_place;
 /// Example:
 ///
 /// ```rust
-/// # use kvs::{SledKvsEngine, Result};
+/// # use anyhow::{Result, Context};
 /// use std::env::current_dir;
-/// use kvs::KvsEngine;
-/// fn main() -> Result<()> {
-/// let mut store = SledKvsEngine::open(current_dir()?)?;
-/// store.set("key".to_string(), "value".to_string())?;
-/// store.set("key1".to_string(), "value1".to_string())?;
-/// store.remove("key1".to_string())?;
-/// assert_eq!(store.get("key".to_string())?, Some("value".to_string()));
-/// assert_eq!(store.get("key1".to_string())?, None);
-/// Ok(())
-/// }
+/// use kvs::{KvsEngine, SledKvsEngine};
+/// # fn main() -> Result<()> {
+/// let rt = tokio::runtime::Runtime::new().context("failed to create tokio runtime")?;
+/// rt.block_on(async move {
+///     let mut store = SledKvsEngine::open(current_dir()?)?;
+///     store.set("key".to_string(), "value".to_string()).await?;
+///     store.set("key1".to_string(), "value1".to_string()).await?;
+///     store.remove("key1".to_string()).await?;
+///     assert_eq!(store.get("key".to_string()).await?, Some("value".to_string()));
+///     assert_eq!(store.get("key1".to_string()).await?, None);
+///     Ok(())
+/// })
+/// # }
 ///```
 
 #[derive(Clone)]
@@ -66,7 +69,7 @@ impl KvsEngine for SledKvsEngine {
                 self.db.flush()?;
                 Ok(())
             } else {
-                Err(KvsError::KeyNotFound)
+                Err(KvsError::KeyNotFound.into())
             }
         })
     }
