@@ -212,7 +212,6 @@ impl LogWriter {
 
 #[derive(Clone)]
 pub struct KvStore {
-    log_dir: PathBuf,
     reader: LogReader,
     writer: Arc<Mutex<LogWriter>>,
 }
@@ -284,11 +283,7 @@ impl KvStore {
             log_dir: PathBuf::clone(&log_dir),
         }));
 
-        Ok(KvStore {
-            log_dir,
-            reader,
-            writer,
-        })
+        Ok(KvStore { reader, writer })
     }
 }
 

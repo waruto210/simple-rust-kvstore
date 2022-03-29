@@ -3,12 +3,9 @@ use crate::{
     KvsError, Result,
 };
 use futures::prelude::*;
-use tokio::{
-    io::{BufReader, BufWriter},
-    net::{
-        tcp::{OwnedReadHalf, OwnedWriteHalf},
-        TcpStream, ToSocketAddrs,
-    },
+use tokio::net::{
+    tcp::{OwnedReadHalf, OwnedWriteHalf},
+    TcpStream, ToSocketAddrs,
 };
 use tokio_serde::formats::SymmetricalJson;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
@@ -41,8 +38,6 @@ impl KvsClient {
         let stream = TcpStream::connect(addr).await?;
 
         let (read_half, write_half) = stream.into_split();
-        // let buf_reader = BufReader::new(read_half);
-        // let buf_writer = BufWriter::new(write_half);
 
         let reader = tokio_serde::SymmetricallyFramed::new(
             FramedRead::new(read_half, LengthDelimitedCodec::new()),

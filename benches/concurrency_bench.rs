@@ -27,9 +27,8 @@ fn write(c: &mut Criterion) {
     let mut group = c.benchmark_group("write");
     group.sampling_mode(SamplingMode::Flat);
     group.sample_size(10);
-    let num_cores = 8;
 
-    let threads = (1..=8).map(|x| x * 2).collect::<Vec<_>>();
+    let threads = vec![1, 2, 4, 8, 16];
 
     let mut rng = rand::thread_rng();
     let mut keys = Vec::with_capacity(1000);
@@ -132,7 +131,8 @@ fn read(c: &mut Criterion) {
     let mut group = c.benchmark_group("read");
     group.sampling_mode(SamplingMode::Flat);
     group.sample_size(10);
-    let threads = (1..=8).map(|x| x * 2).collect::<Vec<_>>();
+
+    let threads = vec![1, 2, 4, 8, 16];
 
     let mut rng = rand::thread_rng();
     let mut keys = Vec::with_capacity(1000);

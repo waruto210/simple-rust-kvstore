@@ -123,15 +123,15 @@ pub struct KvsClient {
 
 测试环境如下：
 
-![image-20210207220242651](medias/image-20210207220242651.png)
+![image-20220329094816786](medias/image-20220329094816786.png)
 
 可见自己实现的`KvStore`在写入性能上大幅优于`sled`，这可能是由于 sled 的每次`flush`操作比较耗时。
 
-![violin](medias/violin.svg)
+![Violin Plot](medias/violin-8518567.svg)
 
 在读取操作上，则是`sled`大幅度优于自己实现的`KvStore`，应该是由于 sled 在内存中保存了数据，而`KvStore`每次都要从文件中读取。
 
-![violin1](medias/violin1.svg)
+![Violin Plot](medias/violin.svg)
 
 ## Project4
 
@@ -171,19 +171,15 @@ pub struct KvStore {
 
 按照指引进行了 benchmark 测试，测试平台如 project3，结果如下：
 
-随着server 线程池线程数量增加，平均响应时间有所改善，但是服务抖动很大。
+写入测试结果如下，随着server 线程池线程数量增加，写入耗时逐渐减少。sled在线程数为2时，效果好于4/8线程，这应该是因为sled在写入时加锁竞争较大。
 
-![violin3](medias/violin3.svg)
+![Line Chart](medias/lines.svg)
 
-![lines1](medias/lines1.svg)
+![Violin Plot](medias/violin-8518855.svg)
 
-读取测试的结果与写入测试类似。出现的波动可能是测试平台的其他服务干扰。
 
-![violin4](medias/violin4.svg)
+读取测试的结果与写入测试类似。线程数少时，sled引擎表现最好，线程多时，三者相当。
 
-![lines](medias/lines.svg)
+![Line Chart](medias/lines-8518886.svg)
 
-## 之外
-
-在查看talen-plan仓库中的示例solution之后，发现其中存在一些版本兼容性导致的直接Panic，已提交Pr修复。我将自己project4中的benchmark代码应用到示例solution中，发现测试一小段时间后，Tcp Server会崩溃，由于时间限制，暂未发现原因，如果有时间，会再查找。
-
+![Violin Plot](medias/violin-8518896.svg)

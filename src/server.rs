@@ -1,10 +1,9 @@
 use crate::protocol::{Request, Response};
 use crate::{KvsEngine, Result};
 use futures::prelude::*;
-use log::{debug, error, info};
+use log::{debug, error};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio::io::{BufReader, BufWriter};
 
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
 use tokio_serde::formats::SymmetricalJson;
@@ -57,8 +56,6 @@ where
 async fn handle_request(engine: impl KvsEngine, mut stream: TcpStream) -> Result<()> {
     let addr = stream.peer_addr()?;
     let (read_half, write_half) = stream.split();
-    // let buf_reader = BufReader::new(read_half);
-    // let buf_writer = BufWriter::new(write_half);
 
     let mut reader = tokio_serde::SymmetricallyFramed::new(
         FramedRead::new(read_half, LengthDelimitedCodec::new()),

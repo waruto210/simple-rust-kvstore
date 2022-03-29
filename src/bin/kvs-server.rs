@@ -3,7 +3,6 @@ use env_logger::Builder;
 use kvs::Result;
 use kvs::{KvStore, KvsEngine, KvsServer, SledKvsEngine};
 use log::{error, info, LevelFilter};
-use num_cpus;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::net::SocketAddr;
