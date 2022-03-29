@@ -183,3 +183,19 @@ pub struct KvStore {
 ![Line Chart](medias/lines-8518886.svg)
 
 ![Violin Plot](medias/violin-8518896.svg)
+
+# Project5
+
+使用tokio实现的简单异步版本。
+
+写入测试结果如下图，当线程在2以上时，写入速度没有明显改善，慢于同步版本。可能是因为实现的比较简单，大部分还是阻塞的io操作，另外bench设计也有一定问题，同步和异步两种bench发压的方式也不同。
+
+![Line Chart](medias/lines-8520335.svg)
+
+![Violin Plot](medias/violin-8520343.svg)
+
+读取测试结果如下图，与写入测试相似。
+
+![Line Chart](medias/lines-8520663.svg)
+
+![Violin Plot](medias/violin-8520668.svg)
