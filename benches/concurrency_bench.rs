@@ -59,7 +59,7 @@ fn write(c: &mut Criterion) {
         });
 
         let client_rt = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
+            .worker_threads(16)
             .enable_all()
             .build()
             .unwrap();
@@ -101,7 +101,7 @@ fn write(c: &mut Criterion) {
         });
 
         let client_rt = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
+            .worker_threads(16)
             .enable_all()
             .build()
             .unwrap();
@@ -172,7 +172,7 @@ fn read(c: &mut Criterion) {
         });
 
         let client_rt = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
+            .worker_threads(16)
             .enable_all()
             .build()
             .unwrap();
@@ -202,6 +202,15 @@ fn read(c: &mut Criterion) {
 
         let temp_dir = TempDir::new().unwrap();
         let engine = SledKvsEngine::open(temp_dir.path()).unwrap();
+
+        rt.block_on(async {
+            for i in 0..1000 {
+                if let Err(e) = engine.set(keys[i].clone(), values[i].to_owned()).await {
+                    eprintln!("init set error {}", e);
+                }
+            }
+        });
+
         let state = Arc::new(AtomicBool::new(true));
         let mut server = KvsServer::new(engine, state.clone());
         rt.spawn(async move {
@@ -214,7 +223,7 @@ fn read(c: &mut Criterion) {
         });
 
         let client_rt = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
+            .worker_threads(16)
             .enable_all()
             .build()
             .unwrap();
