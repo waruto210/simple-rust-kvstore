@@ -32,6 +32,11 @@ walkdir = "2.2.7"
 crossbeam-utils = "0.6.5"
 panic-control = "0.1.4"
 
+
+[[bench]]
+name = "engine_bench"
+harness = false
+
 [[bench]]
 name = "concurrency_bench"
 harness = false

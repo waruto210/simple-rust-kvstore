@@ -104,3 +104,9 @@ where
 
     Ok(())
 }
+
+/// close server
+pub fn close_server<A: ToSocketAddrs>(state: Arc<AtomicBool>, addr: A) {
+    state.store(false, Ordering::SeqCst);
+    let _ = TcpStream::connect(addr);
+}
