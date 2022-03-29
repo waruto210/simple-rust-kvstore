@@ -127,11 +127,11 @@ pub struct KvsClient {
 
 可见自己实现的`KvStore`在写入性能上大幅优于`sled`，这可能是由于 sled 的每次`flush`操作比较耗时。
 
-![Violin Plot](medias/violin-8518567.svg)
+![Violin Plot](medias/violin.svg)
 
 在读取操作上，则是`sled`大幅度优于自己实现的`KvStore`，应该是由于 sled 在内存中保存了数据，而`KvStore`每次都要从文件中读取。
 
-![Violin Plot](medias/violin.svg)
+![Violin Plot](medias/violin-8548037.svg)
 
 ## Project4
 
@@ -171,15 +171,15 @@ pub struct KvStore {
 
 按照指引进行了 benchmark 测试，测试平台如 project3，结果如下：
 
-写入测试结果如下，随着server 线程池线程数量增加，写入耗时逐渐减少。sled在线程数为2时，效果好于4/8线程，这应该是因为sled在写入时加锁竞争较大。
+写入测试结果如下，随着server 线程池线程数量增加，写入耗时逐渐减少。
 
 ![Line Chart](medias/lines.svg)
 
-![Violin Plot](medias/violin-8518855.svg)
+![Violin Plot](medias/violin-8548088.svg)
 
 
 读取测试的结果与写入测试类似。线程数少时，sled引擎表现最好，线程多时，三者相当。
 
-![Line Chart](medias/lines-8518886.svg)
+![Line Chart](medias/lines-8548098.svg)
 
-![Violin Plot](medias/violin-8518896.svg)
+![Violin Plot](medias/violin-8548108.svg)
