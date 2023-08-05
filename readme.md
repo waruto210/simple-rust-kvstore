@@ -125,11 +125,11 @@ pub struct KvsClient {
 
 ![image-20220329094816786](medias/image-20220329094816786.png)
 
-可见自己实现的`KvStore`在写入性能上大幅优于`sled`，这可能是由于 sled 的每次`flush`操作比较耗时。
+可见自己实现的`KvStore`在写入性能上大幅优于`sled`，这应该是由于 sled 基于B+Tree并且每次写入是进行的`flush`操作比较耗时。
 
 ![Violin Plot](medias/violin.svg)
 
-在读取操作上，则是`sled`大幅度优于自己实现的`KvStore`，应该是由于 sled 在内存中保存了数据，而`KvStore`每次都要从文件中读取。
+在读取操作上，则是`sled`大幅度优于自己实现的`KvStore`，应该是由于 sled 在内存中保存了数据，而`KvStore`每次都要通过索引从文件中读取。
 
 ![Violin Plot](medias/violin-8548268.svg)
 
